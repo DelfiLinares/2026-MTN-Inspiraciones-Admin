@@ -1,0 +1,622 @@
+openapi: 3.0.3
+info:
+  title: API REST - Módulo de Administración y Moderación
+  description: >
+    Contrato de la API REST consumida por el frontend-admin (React). Esta API es implementada por el
+    backend (Java/Spring Boot/MySQL), fuera de alcance de este plan. Este documento describe únicamente
+    el contrato consumido, no la implementación del servidor. Trazabilidad con specs/001-admin-moderacion/spec.md.
+  version: "1.0.0"
+
+servers:
+  - url: /api/admin
+    description: Prefijo base de todas las operaciones administrativas
+
+tags:
+  - name: Auth
+    description: Autenticación de administrador (US1, FR-001, FR-002)
+  - name: Dashboard
+    description: Indicadores resumen (US4, FR-003)
+  - name: Usuarios
+    description: Gestión de usuarios (US3, FR-004..FR-007)
+  - name: Moderacion
+    description: Moderación de publicaciones y reportes (US2, FR-008..FR-011)
+  - name: Desafios
+    description: Gestión de desafíos propuestos (US5, FR-012..FR-016)
+  - name: Reportes
+    description: Reportes y analíticas exportables (US6, FR-017..FR-019)
+
+paths:
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Autenticar administrador (FR-001, FR-002)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+      responses:
+        "200":
+          description: Autenticación exitosa; el rol del usuario debe ser ADMIN.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SesionAdministrativaResponse"
+        "401":
+          description: Credenciales inválidas.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Usuario válido pero sin rol ADMIN (FR-002).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      summary: Consultar indicadores resumen de la plataforma (FR-003)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Indicadores agregados por el backend.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardIndicadores"
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+
+  /usuarios:
+    get:
+      tags: [Usuarios]
+      summary: Buscar usuarios con paginación y filtros resueltos por la API (FR-004, FR-024)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - in: query
+          name: texto
+          schema: { type: string }
+          description: Criterio de búsqueda (nombre/email).
+        - in: query
+          name: rol
+          schema: { $ref: "#/components/schemas/RolUsuario" }
+        - in: query
+          name: estadoCuenta
+          schema: { $ref: "#/components/schemas/EstadoCuentaUsuario" }
+      responses:
+        "200":
+          description: Página de usuarios coincidentes.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginaUsuarios"
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+
+  /usuarios/{usuarioId}/banear:
+    post:
+      tags: [Usuarios]
+      summary: Banear a un usuario (FR-005). Requiere confirmación explícita en el cliente antes de invocar.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UsuarioId"
+      responses:
+        "200":
+          description: Usuario baneado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Usuario" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: >
+            Conflicto de negocio, p. ej. intento de banear a sí mismo (research.md §5, FR-029).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /usuarios/{usuarioId}:
+    delete:
+      tags: [Usuarios]
+      summary: Eliminar a un usuario (FR-006). Requiere confirmación explícita en el cliente antes de invocar.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UsuarioId"
+      responses:
+        "204":
+          description: Usuario eliminado.
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: Conflicto de negocio, p. ej. intento de eliminarse a sí mismo (FR-029).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /usuarios/{usuarioId}/promover:
+    post:
+      tags: [Usuarios]
+      summary: >
+        Promover un usuario a rol ADMIN (FR-007). Solo puede ser invocado por un actor con rol ADMIN
+        (validado también por el backend). Requiere confirmación explícita en el cliente.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/UsuarioId"
+      responses:
+        "200":
+          description: Usuario promovido a ADMIN.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Usuario" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+
+  /publicaciones/reportadas:
+    get:
+      tags: [Moderacion]
+      summary: >
+        Consultar publicaciones/reportes en estado pendiente, con paginación y filtros server-side
+        (FR-008, FR-024, FR-025).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - in: query
+          name: motivo
+          schema: { $ref: "#/components/schemas/MotivoReporte" }
+        - in: query
+          name: estadoReporte
+          schema: { $ref: "#/components/schemas/EstadoReporte" }
+        - in: query
+          name: ordenarPor
+          schema:
+            type: string
+            enum: [antiguedad, prioridad]
+      responses:
+        "200":
+          description: Página de reportes sobre publicaciones.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaginaReportes"
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+
+  /reportes/{reporteId}:
+    get:
+      tags: [Moderacion]
+      summary: Consultar el detalle de un reporte (FR-009)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ReporteId"
+      responses:
+        "200":
+          description: Detalle del reporte, incluyendo la publicación asociada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReporteDetalle" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+
+  /reportes/{reporteId}/resolver-sin-eliminar:
+    post:
+      tags: [Moderacion]
+      summary: >
+        Marcar un reporte como resuelto sin eliminar la publicación (research.md §6, resuelve FR-026).
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/ReporteId"
+      responses:
+        "200":
+          description: Reporte resuelto sin eliminación.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReporteDetalle" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+
+  /publicaciones/{publicacionId}:
+    delete:
+      tags: [Moderacion]
+      summary: >
+        Eliminar una publicación reportada (FR-010). Requiere confirmación explícita en el cliente.
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/PublicacionId"
+      responses:
+        "204":
+          description: Publicación eliminada (pasa a estado ELIMINADA).
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+
+  /desafios:
+    get:
+      tags: [Desafios]
+      summary: Consultar desafíos propuestos, con paginación y filtro por estado (FR-012)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - in: query
+          name: estado
+          schema: { $ref: "#/components/schemas/EstadoDesafioPropuesto" }
+      responses:
+        "200":
+          description: Página de desafíos propuestos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaginaDesafios" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+
+  /desafios/{desafioId}:
+    get:
+      tags: [Desafios]
+      summary: Consultar el detalle de un desafío propuesto (FR-013)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DesafioId"
+      responses:
+        "200":
+          description: Detalle del desafío propuesto.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Desafio" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+
+  /desafios/{desafioId}/aprobar:
+    post:
+      tags: [Desafios]
+      summary: Aprobar un desafío propuesto (FR-014)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DesafioId"
+      responses:
+        "200":
+          description: Desafío aprobado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Desafio" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: El desafío ya no está en estado PENDIENTE.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /desafios/{desafioId}/rechazar:
+    post:
+      tags: [Desafios]
+      summary: Rechazar un desafío propuesto (FR-015)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/DesafioId"
+      responses:
+        "200":
+          description: Desafío rechazado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Desafio" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: El desafío ya no está en estado PENDIENTE.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /reportes-analiticas:
+    get:
+      tags: [Reportes]
+      summary: Consultar reportes/analíticas con datos ya agregados por el backend (FR-017)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Lista de conjuntos de datos agregados disponibles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ReporteAnalitica" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+
+  /reportes-analiticas/exportaciones:
+    post:
+      tags: [Reportes]
+      summary: Iniciar la exportación de un reporte/analítica (FR-018, research.md §4)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reporteAnaliticaId]
+              properties:
+                reporteAnaliticaId:
+                  type: string
+      responses:
+        "202":
+          description: Exportación aceptada, en proceso.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportacionReporte" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+
+  /reportes-analiticas/exportaciones/{exportacionId}:
+    get:
+      tags: [Reportes]
+      summary: Consultar el estado de una exportación de reporte (FR-028, research.md §4)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: exportacionId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Estado actual de la exportación.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportacionReporte" }
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+
+  /reportes-analiticas/exportaciones/{exportacionId}/descarga:
+    get:
+      tags: [Reportes]
+      summary: Descargar el archivo de reporte exportado, una vez en estado LISTO (FR-019)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: exportacionId
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Archivo binario del reporte exportado (p. ej. .xlsx).
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401": { $ref: "#/components/responses/NoAutenticado" }
+        "403": { $ref: "#/components/responses/SinPermiso" }
+        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: La exportación aún no está en estado LISTO.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page:
+      in: query
+      name: page
+      schema: { type: integer, minimum: 0, default: 0 }
+      description: Número de página (paginación server-side, FR-024).
+    PageSize:
+      in: query
+      name: pageSize
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    UsuarioId:
+      in: path
+      name: usuarioId
+      required: true
+      schema: { type: string }
+    ReporteId:
+      in: path
+      name: reporteId
+      required: true
+      schema: { type: string }
+    PublicacionId:
+      in: path
+      name: publicacionId
+      required: true
+      schema: { type: string }
+    DesafioId:
+      in: path
+      name: desafioId
+      required: true
+      schema: { type: string }
+
+  responses:
+    NoAutenticado:
+      description: No hay sesión válida (FR-020).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    SinPermiso:
+      description: El usuario autenticado no tiene rol ADMIN o no tiene permiso para la operación.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NoEncontrado:
+      description: El recurso solicitado no existe.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        codigo: { type: string }
+        mensaje: { type: string }
+
+    RolUsuario:
+      type: string
+      enum: [USER, ADMIN]
+
+    EstadoCuentaUsuario:
+      type: string
+      enum: [ACTIVO, BANEADO, ELIMINADO]
+
+    EstadoPublicacion:
+      type: string
+      enum: [ACTIVA, REPORTADA, ELIMINADA]
+
+    EstadoDesafioPropuesto:
+      type: string
+      enum: [PENDIENTE, APROBADO, RECHAZADO]
+
+    MotivoReporte:
+      type: string
+      enum: [CONTENIDO_INAPROPIADO, SPAM, PLAGIO, DISCURSO_DE_ODIO, OTRO]
+
+    EstadoReporte:
+      type: string
+      enum: [PENDIENTE, RESUELTO_SIN_ELIMINAR, RESUELTO_CON_ELIMINACION]
+
+    EstadoExportacionReporte:
+      type: string
+      enum: [EN_PROCESO, LISTO, ERROR]
+
+    Usuario:
+      type: object
+      properties:
+        id: { type: string }
+        nombre: { type: string }
+        email: { type: string, format: email }
+        rol: { $ref: "#/components/schemas/RolUsuario" }
+        estadoCuenta: { $ref: "#/components/schemas/EstadoCuentaUsuario" }
+        fechaRegistro: { type: string, format: date-time }
+
+    SesionAdministrativaResponse:
+      type: object
+      properties:
+        token: { type: string }
+        expiraEn: { type: string, format: date-time }
+        usuario: { $ref: "#/components/schemas/Usuario" }
+
+    DashboardIndicadores:
+      type: object
+      properties:
+        reportesPendientes: { type: integer }
+        usuariosActivos: { type: integer }
+        desafiosPendientes: { type: integer }
+        indicadoresGenerales:
+          type: object
+          additionalProperties: { type: number }
+
+    PaginaUsuarios:
+      type: object
+      properties:
+        contenido:
+          type: array
+          items: { $ref: "#/components/schemas/Usuario" }
+        totalElementos: { type: integer }
+        totalPaginas: { type: integer }
+        paginaActual: { type: integer }
+
+    Publicacion:
+      type: object
+      properties:
+        id: { type: string }
+        autorId: { type: string }
+        titulo: { type: string }
+        estado: { $ref: "#/components/schemas/EstadoPublicacion" }
+        fechaCreacion: { type: string, format: date-time }
+
+    Reporte:
+      type: object
+      properties:
+        id: { type: string }
+        publicacionId: { type: string }
+        reportanteId: { type: string }
+        motivo: { $ref: "#/components/schemas/MotivoReporte" }
+        estado: { $ref: "#/components/schemas/EstadoReporte" }
+        fechaCreacion: { type: string, format: date-time }
+        prioridad: { type: string, enum: [ALTA, MEDIA, BAJA] }
+
+    ReporteDetalle:
+      allOf:
+        - $ref: "#/components/schemas/Reporte"
+        - type: object
+          properties:
+            publicacion: { $ref: "#/components/schemas/Publicacion" }
+            reportante: { $ref: "#/components/schemas/Usuario" }
+
+    PaginaReportes:
+      type: object
+      properties:
+        contenido:
+          type: array
+          items: { $ref: "#/components/schemas/Reporte" }
+        totalElementos: { type: integer }
+        totalPaginas: { type: integer }
+        paginaActual: { type: integer }
+
+    Desafio:
+      type: object
+      properties:
+        id: { type: string }
+        autorId: { type: string }
+        titulo: { type: string }
+        descripcion: { type: string }
+        estado: { $ref: "#/components/schemas/EstadoDesafioPropuesto" }
+        fechaPropuesta: { type: string, format: date-time }
+
+    PaginaDesafios:
+      type: object
+      properties:
+        contenido:
+          type: array
+          items: { $ref: "#/components/schemas/Desafio" }
+        totalElementos: { type: integer }
+        totalPaginas: { type: integer }
+        paginaActual: { type: integer }
+
+    ReporteAnalitica:
+      type: object
+      properties:
+        id: { type: string }
+        tipo: { type: string }
+        datosAgregados:
+          type: object
+          additionalProperties: { type: number }
+
+    ExportacionReporte:
+      type: object
+      properties:
+        id: { type: string }
+        reporteAnaliticaId: { type: string }
+        estado: { $ref: "#/components/schemas/EstadoExportacionReporte" }
+        urlDescarga:
+          type: string
+          nullable: true
