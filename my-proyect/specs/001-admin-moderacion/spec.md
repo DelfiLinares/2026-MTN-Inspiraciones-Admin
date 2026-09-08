@@ -8,6 +8,40 @@
 
 **Input**: User description: "Desarrollar un sistema de administración y moderación para una red social de inspiración artística que permita gestionar usuarios, publicaciones, reportes, desafíos y reportes/analíticas. Actores: Administrador, Usuario, Sistema. Requisitos funcionales sobre login de administrador, dashboard, gestión de usuarios, moderación de publicaciones y reportes, gestión de desafíos, reportes/analíticas y permisos. Requisitos no funcionales de usabilidad, performance, seguridad y calidad. Fuera de alcance: registro de usuarios, funcionalidades de usuario final, generación de recomendaciones/rankings/analytics/archivos de reportes/mails, implementación de API REST del backend y APIs externas, persistencia en base de datos."
 
+## Clarifications
+
+### Session 2026-09-08
+
+- Q: ¿Debe existir una acción explícita para cerrar un reporte como "no amerita eliminación" sin
+  borrar la publicación? → A: Sí. Se agrega la acción "resolver reporte sin eliminar publicación",
+  que cambia el estado del **reporte** (no de la publicación) a un estado de cierre.
+- Q: ¿Qué debe permitirse cuando un ADMIN intenta banear/eliminar a **otro ADMIN**, o a **sí mismo**? →
+  B: Ambos casos quedan **prohibidos**. Las acciones de banear/eliminar solo pueden aplicarse sobre
+  usuarios con rol `USER`; si el usuario objetivo tiene rol `ADMIN` (incluido el propio actor
+  autenticado), la acción debe estar deshabilitada en la UI y ser rechazada por el backend si se
+  invoca igualmente. La promoción a `ADMIN` sobre un usuario que ya es `ADMIN` se considera una
+  operación inválida (no-op / rechazo) independientemente de esta decisión.
+- Q: ¿Cómo se comunica el estado de una exportación de reporte mientras se genera? → B: **Síncrono**.
+  La solicitud de exportación (`POST /reportes-analiticas/exportaciones`) espera a que el archivo se
+  genere y devuelve directamente el resultado (disponible para descarga) en la misma respuesta, sin
+  un flujo de dos pasos con polling de estado.
+- Q: Si la sesión expira mientras el admin está confirmando una acción destructiva, ¿qué debe pasar?
+  → A: **Cancelar la acción en curso y redirigir a login**, informando explícitamente que la acción
+  no fue aplicada.
+- Q: ¿Qué significa "usuario activo" para el indicador del dashboard? → A: Cuenta con
+  `estadoCuenta = ACTIVO` (no baneada ni eliminada), sin considerar actividad reciente ni ventana de
+  tiempo.
+- Q: ¿Un desafío ya `APROBADO`/`RECHAZADO` puede revertirse? → **Decisión final**: no puede revertirse
+  ni reconsiderarse una vez aprobado o rechazado; las acciones aprobar/rechazar quedan permanentemente
+  deshabilitadas para ese desafío.
+- Q: ¿Qué conjunto exacto de "indicadores generales" debe mostrar el dashboard? → Conjunto fijo
+  adicional definido: **total de publicaciones activas**, **total de publicaciones eliminadas**
+  (histórico), **total de usuarios baneados**, **total de desafíos aprobados/rechazados** (histórico),
+  sumados a los 3 indicadores ya definidos (reportes pendientes, usuarios activos, desafíos
+  pendientes).
+- Q: ¿Qué debe comunicarse al admin si la exportación de un reporte falla en el backend? → Mostrar el
+  mensaje **"Error: Reporte no generado."**
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Acceso seguro al módulo administrativo (Priority: P1)
@@ -66,9 +100,8 @@ reportada, confirmando que su estado cambia a ELIMINADA y que deja de listarse c
 5. **Given** el administrador confirma la eliminación, **When** se ejecuta la acción, **Then** la
    publicación pasa a estado ELIMINADA y dicha acción se distingue visualmente como una acción sensible.
 6. **Given** un reporte que el administrador decide que no amerita eliminar la publicación, **When**
-   revisa el reporte, **Then** puede marcarlo como resuelto/descartado sin eliminar la publicación
-   [NEEDS CLARIFICATION: no se especifica un flujo explícito de "descartar reporte sin eliminar
-   publicación"; se asume necesario para no forzar siempre la eliminación, a confirmar].
+   revisa el reporte, **Then** puede marcarlo como "resuelto sin eliminar" mediante una acción explícita
+   de la interfaz, sin eliminar la publicación (ver Clarifications, Session 2026-09-08).
 
 ---
 
@@ -130,9 +163,9 @@ correspondan a los datos agregados provistos por la API.
 3. **Given** el dashboard, **When** se carga, **Then** el sistema muestra la cantidad de desafíos
    propuestos pendientes de revisión.
 4. **Given** el dashboard, **When** se carga, **Then** el sistema muestra indicadores generales de la
-   plataforma [NEEDS CLARIFICATION: no se especifica la lista cerrada de "indicadores generales";
-   se asume un conjunto mínimo de reportes pendientes, usuarios activos y desafíos pendientes, a validar
-   si se requieren más métricas].
+   plataforma: total de publicaciones activas, total de publicaciones eliminadas (histórico), total de
+   usuarios baneados y total de desafíos aprobados/rechazados (histórico) (ver Clarifications, Session
+   2026-09-08).
 5. **Given** los datos del dashboard, **When** se presentan, **Then** provienen de datos ya agregados por
    el backend, sin recalcularse en el cliente.
 
@@ -162,9 +195,9 @@ cambio de estado resultante.
 4. **Given** el detalle de un desafío propuesto, **When** el administrador ejecuta la acción "rechazar",
    **Then** el desafío pasa a estado RECHAZADO.
 5. **Given** un desafío ya está en estado APROBADO o RECHAZADO, **When** el administrador lo visualiza,
-   **Then** las acciones de aprobar/rechazar ya no están disponibles o se muestran deshabilitadas
-   [NEEDS CLARIFICATION: no se especifica si un desafío ya aprobado/rechazado puede revertirse o
-   reconsiderarse; se asume que la decisión es final, a confirmar].
+   **Then** las acciones de aprobar/rechazar ya no están disponibles y se muestran deshabilitadas de
+   forma permanente: la decisión es final y no puede revertirse ni reconsiderarse (ver Clarifications,
+   Session 2026-09-08).
 
 ---
 
@@ -186,21 +219,24 @@ ofrece la descarga del archivo generado.
 1. **Given** el administrador accede a la pantalla de reportes/analíticas, **When** la pantalla carga,
    **Then** el sistema muestra los datos agregados provistos por el backend.
 2. **Given** la pantalla de reportes/analíticas, **When** el administrador solicita iniciar una
-   exportación, **Then** el sistema envía la solicitud de exportación al backend/módulo de reportes.
-3. **Given** una exportación fue solicitada, **When** el archivo de reporte está listo, **Then** el
-   sistema ofrece al administrador un enlace o acción clara para descargarlo.
-4. **Given** una exportación fue solicitada, **When** el archivo aún no está disponible, **Then** el
-   sistema comunica claramente el estado de "en proceso" al administrador
-   [NEEDS CLARIFICATION: no se especifica si la generación del reporte es síncrona o asíncrona, ni el
-   mecanismo de aviso (polling, notificación, refresco manual) cuando el archivo está listo].
+   exportación, **Then** el sistema envía la solicitud de exportación al backend/módulo de reportes de
+   forma **síncrona**: la solicitud espera hasta que el archivo esté generado y la respuesta incluye
+   directamente el resultado disponible para descarga (ver Clarifications, Session 2026-09-08).
+3. **Given** una exportación fue solicitada y el backend responde con éxito, **When** la respuesta
+   llega, **Then** el sistema ofrece al administrador un enlace o acción clara para descargar el
+   archivo generado.
+4. **Given** una exportación fue solicitada, **When** el backend falla al generar el archivo, **Then**
+   el sistema muestra al administrador el mensaje **"Error: Reporte no generado."** (ver Clarifications,
+   Session 2026-09-08).
 
 ---
 
 ### Edge Cases
 
-- ¿Qué sucede si un administrador intenta banear, eliminar o promover a otro administrador?
-  [NEEDS CLARIFICATION: no se especifica si estas acciones están permitidas entre administradores o si
-  existen restricciones adicionales, por ejemplo impedir que un admin se banee/elimine a sí mismo].
+- **Resuelto (ver Clarifications, Session 2026-09-08)**: Si un administrador intenta banear o eliminar
+  a **otro administrador** o a **sí mismo**, la acción está prohibida: se deshabilita en la UI y se
+  rechaza en el backend. Banear/eliminar solo aplica sobre usuarios con rol `USER`. Promover a un
+  usuario que ya tiene rol `ADMIN` se rechaza como operación inválida (no-op).
 - ¿Qué sucede si dos administradores intentan actuar simultáneamente sobre el mismo reporte o usuario
   (por ejemplo, uno elimina una publicación mientras otro la está revisando)?
 - ¿Qué sucede si un usuario reportado/eliminado ya no existe al momento de revisar el reporte?
@@ -209,12 +245,14 @@ ofrece la descarga del archivo generado.
   aplicó o no.
 - ¿Cómo se comporta el listado de reportes/publicaciones/usuarios cuando no hay resultados que coincidan
   con los filtros aplicados?
-- ¿Qué ocurre si la sesión del administrador expira mientras está completando una acción sensible (por
-  ejemplo, a mitad de confirmar una eliminación)?
+- **Resuelto (ver Clarifications, Session 2026-09-08)**: Si la sesión del administrador expira mientras
+  está completando una acción sensible (por ejemplo, a mitad de confirmar una eliminación), el sistema
+  cancela la acción en curso, descarta cualquier confirmación pendiente y redirige al login, informando
+  explícitamente que la acción no fue aplicada.
 - ¿Qué sucede si se intenta acceder directamente (por URL) a una pantalla del módulo administrativo sin
   haber iniciado sesión como ADMIN?
-- ¿Qué sucede si la exportación de un reporte falla en el backend? [NEEDS CLARIFICATION: no se especifica
-  el mensaje o comportamiento esperado ante un fallo de generación del archivo de reporte].
+- **Resuelto (ver Clarifications, Session 2026-09-08)**: Si la exportación de un reporte falla en el
+  backend, el sistema muestra el mensaje **"Error: Reporte no generado."**
 
 ## Requirements *(mandatory)*
 
@@ -225,16 +263,23 @@ ofrece la descarga del archivo generado.
 - **FR-002**: El sistema MUST permitir el acceso al módulo administrativo únicamente a usuarios con rol
   ADMIN; cualquier otro rol MUST ser rechazado con un mensaje claro.
 - **FR-003**: El sistema MUST mostrar un dashboard con: cantidad de reportes pendientes, cantidad de
-  usuarios activos, cantidad de desafíos propuestos pendientes de revisión, e indicadores generales de la
-  plataforma.
+  usuarios activos (cuentas con `estadoCuenta = ACTIVO`), cantidad de desafíos propuestos pendientes de
+  revisión, y los siguientes indicadores generales adicionales: total de publicaciones activas, total de
+  publicaciones eliminadas (histórico), total de usuarios baneados, y total de desafíos
+  aprobados/rechazados (histórico) (ver Clarifications, Session 2026-09-08).
 - **FR-004**: El sistema MUST permitir buscar usuarios mediante criterios de búsqueda resueltos contra la
   API, con resultados paginados.
-- **FR-005**: El sistema MUST permitir banear a un usuario, requiriendo confirmación explícita antes de
-  ejecutar la acción.
-- **FR-006**: El sistema MUST permitir eliminar a un usuario, requiriendo confirmación explícita antes de
-  ejecutar la acción.
+- **FR-005**: El sistema MUST permitir banear a un usuario **con rol USER**, requiriendo confirmación
+  explícita antes de ejecutar la acción. Esta acción MUST estar deshabilitada cuando el usuario objetivo
+  tiene rol ADMIN o coincide con el propio administrador autenticado (ver Clarifications, Session
+  2026-09-08).
+- **FR-006**: El sistema MUST permitir eliminar a un usuario **con rol USER**, requiriendo confirmación
+  explícita antes de ejecutar la acción. Esta acción MUST estar deshabilitada cuando el usuario objetivo
+  tiene rol ADMIN o coincide con el propio administrador autenticado (ver Clarifications, Session
+  2026-09-08).
 - **FR-007**: El sistema MUST permitir promover a un usuario a rol ADMIN, y esta acción MUST estar
-  disponible únicamente para quienes ya tienen rol ADMIN, requiriendo confirmación explícita.
+  disponible únicamente para quienes ya tienen rol ADMIN, requiriendo confirmación explícita. Si el
+  usuario objetivo ya tiene rol ADMIN, la acción MUST rechazarse como operación inválida (no-op).
 - **FR-008**: El sistema MUST mostrar el listado de publicaciones en estado REPORTADA, con paginación y
   filtros resueltos contra la API.
 - **FR-009**: El sistema MUST permitir visualizar el detalle de un reporte sobre una publicación
@@ -247,8 +292,12 @@ ofrece la descarga del archivo generado.
   identificar los que están en estado PENDIENTE.
 - **FR-013**: El sistema MUST permitir visualizar el detalle de un desafío propuesto, incluyendo la
   información del formulario de propuesta.
-- **FR-014**: El sistema MUST permitir aprobar un desafío propuesto, cambiando su estado a APROBADO.
+- **FR-014**: El sistema MUST permitir aprobar un desafío propuesto, cambiando su estado a APROBADO. Esta
+  decisión es final: un desafío APROBADO no puede revertirse ni reconsiderarse (ver Clarifications,
+  Session 2026-09-08).
 - **FR-015**: El sistema MUST permitir rechazar un desafío propuesto, cambiando su estado a RECHAZADO.
+  Esta decisión es final: un desafío RECHAZADO no puede revertirse ni reconsiderarse (ver Clarifications,
+  Session 2026-09-08).
 - **FR-016**: El sistema MUST representar el estado de un desafío propuesto únicamente como uno de los
   siguientes valores: PENDIENTE, APROBADO o RECHAZADO.
 - **FR-017**: El sistema MUST permitir visualizar reportes y analíticas de la plataforma con datos ya
@@ -270,21 +319,20 @@ ofrece la descarga del archivo generado.
 - **FR-025**: El sistema MUST mostrar indicadores de prioridad y/o antigüedad en los listados de reportes
   pendientes, para facilitar su identificación y resolución rápida.
 
-*Ambigüedades marcadas explícitamente:*
+*Requisitos derivados de la sesión de clarificación (Session 2026-09-08):*
 
-- **FR-026**: El sistema MUST permitir [NEEDS CLARIFICATION: no se especifica si existe una acción de
-  "descartar/resolver reporte sin eliminar la publicación" o si la única acción posible sobre un reporte
-  es eliminar o no hacer nada].
-- **FR-027**: El sistema MUST manejar el flujo de expiración de sesión durante una acción sensible
-  [NEEDS CLARIFICATION: no se especifica el comportamiento exacto: reintentar tras reautenticación,
-  cancelar la acción, o mostrar error].
-- **FR-028**: El sistema MUST comunicar el estado de una exportación de reporte en curso
-  [NEEDS CLARIFICATION: no se especifica si el proceso de exportación es síncrono o asíncrono, ni el
-  mecanismo de actualización de estado (polling, notificación push, refresco manual)].
-- **FR-029**: El sistema MUST definir el comportamiento al intentar aplicar acciones administrativas
-  (banear, eliminar, promover) sobre otro usuario con rol ADMIN, o sobre la propia cuenta del
-  administrador que ejecuta la acción [NEEDS CLARIFICATION: no se especifica si están permitidas o
-  restringidas estas operaciones entre administradores o sobre uno mismo].
+- **FR-026**: El sistema MUST permitir marcar un reporte como "resuelto sin eliminar la publicación",
+  como acción alternativa a eliminar la publicación reportada, cambiando el estado del reporte (no el de
+  la publicación) a un estado de cierre.
+- **FR-027**: El sistema MUST cancelar cualquier acción sensible en curso (eliminar, banear, promover) si
+  la sesión del administrador expira durante su ejecución, descartando la confirmación pendiente y
+  redirigiendo al login con un mensaje explícito de que la acción no fue aplicada.
+- **FR-028**: El sistema MUST solicitar la exportación de un reporte de forma síncrona: la solicitud de
+  exportación espera hasta que el archivo esté generado y la respuesta entrega directamente el resultado
+  disponible para descarga, o un error si la generación falla.
+- **FR-029**: El sistema MUST prohibir las acciones de banear y eliminar cuando el usuario objetivo tiene
+  rol ADMIN, incluyendo el caso en que el usuario objetivo sea el propio administrador autenticado; estas
+  acciones solo MUST estar disponibles sobre usuarios con rol USER.
 
 ### Key Entities *(include if feature involves data)*
 
@@ -342,9 +390,9 @@ ofrece la descarga del archivo generado.
 - Se asume que la generación física de los archivos de reportes (Python/openpyxl-XlsxWriter) es
   responsabilidad de un módulo externo, y que este módulo de frontend solo dispara la solicitud de
   exportación y consume un enlace o archivo ya generado.
-- Se asume que "usuarios activos" en el dashboard se refiere a usuarios con cuenta no baneada ni
-  eliminada [NEEDS CLARIFICATION: no se especifica la definición exacta de "usuario activo" —por ejemplo,
-  si implica actividad reciente en un período de tiempo determinado, o simplemente cuentas habilitadas].
+- **Confirmado (ver Clarifications, Session 2026-09-08)**: "Usuarios activos" en el dashboard se define
+  como usuarios con `estadoCuenta = ACTIVO` (cuenta no baneada ni eliminada), sin considerar actividad
+  reciente ni ventana de tiempo.
 - Se asume que no existe un límite explícito de administradores en la plataforma, y que cualquier
   administrador existente puede promover a otros usuarios sin restricción adicional de cantidad.
 - Se asume que las funcionalidades fuera de alcance (registro de usuarios, home de descubrimiento,
