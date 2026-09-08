@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+coverage/
+
+# Variables de entorno locales (T005): nunca commitear, solo .env.example.
+.env
+.env.local
+.env.*.local
