@@ -1,7 +1,7 @@
 /**
  * Servicio de aplicación `UsuariosService`.
  *
- * Ref: tasks.md T029, contracts/openapi.yaml `GET /usuarios`, `POST /usuarios/{id}/banear`,
+ * Ref: tasks.md T029, T033, contracts/openapi.yaml `GET /usuarios`, `POST /usuarios/{id}/banear`,
  * `DELETE /usuarios/{id}`, `POST /usuarios/{id}/promover`, spec.md FR-004..FR-007, FR-024.
  *
  * Orquesta la búsqueda paginada/filtrada de usuarios y las acciones administrativas
@@ -12,6 +12,7 @@ import { Usuario } from "../domain/Usuario";
 import { RolUsuario } from "../domain/enums/RolUsuario";
 import { EstadoCuentaUsuario } from "../domain/enums/EstadoCuentaUsuario";
 import type { UsuarioResponseDto } from "./AuthAdminService";
+import type { AuthAdminService } from "./AuthAdminService";
 
 export interface BuscarUsuariosParams {
   page?: number;
@@ -47,7 +48,10 @@ function mapearUsuario(dto: UsuarioResponseDto): Usuario {
 }
 
 export class UsuariosService {
-  constructor(private readonly httpClient: HttpClient) {}
+  constructor(
+    private readonly httpClient: HttpClient,
+    private readonly authAdminService: AuthAdminService,
+  ) {}
 
   /** Ref: `GET /usuarios`, FR-004, FR-024 (paginación/filtros server-side). */
   async buscarUsuarios(params: BuscarUsuariosParams = {}): Promise<PaginaUsuarios> {
@@ -88,8 +92,20 @@ export class UsuariosService {
   /**
    * Ref: `POST /usuarios/{usuarioId}/promover`, FR-007. El backend rechaza (409) si el usuario
    * objetivo ya tiene rol ADMIN.
+   *
+   * Ref: tasks.md T033 — regla de **permiso de ejecución** (no del objeto `Usuario` sino del
+   * actor autenticado): solo un `Usuario` cuyo `rol === ADMIN` puede invocar la promoción de
+   * otro usuario. Esta verificación se modela aquí porque depende del actor autenticado
+   * (`AuthAdminService.obtenerSesionActual()`), no del propio dato del usuario objetivo
+   * (data-model.md → Usuario → "Regla de permiso de ejecución").
    */
   async promover(usuarioId: string): Promise<Usuario> {
+    const sesion = this.authAdminService.obtenerSesionActual();
+    if (!sesion || !sesion.tienePermisoDeAdministrador()) {
+      throw new Error(
+        "Solo un usuario con rol ADMIN puede promover a otro usuario a administrador.",
+      );
+    }
     const dto = await this.httpClient.post<UsuarioResponseDto>(`/usuarios/${usuarioId}/promover`);
     return mapearUsuario(dto);
   }
