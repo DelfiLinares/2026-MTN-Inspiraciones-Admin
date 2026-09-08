@@ -36,12 +36,12 @@ administrativo" (FR-002) y con el principio de seguridad de que las acciones adm
 realizarse mediante sesión válida. No se documenta lógica de generación/verificación de tokens en el
 servidor porque es responsabilidad del backend (fuera de alcance).
 
-**Resolución de `NEEDS CLARIFICATION` (FR-027, sesión expirada durante acción sensible)**: Se decide que,
-ante una expiración de sesión detectada durante una acción sensible (eliminar, banear, promover), el
-frontend admin **cancela la acción en curso**, descarta cualquier confirmación pendiente y redirige al
-login, mostrando un mensaje de "sesión expirada, la acción no fue aplicada". Esto evita dejar al usuario
-en un estado ambiguo sobre si la acción se ejecutó. Esta decisión debe validarse con el equipo de negocio
-antes de convertirse en requisito definitivo, pero se adopta como supuesto de diseño.
+**Resolución (FR-027, sesión expirada durante acción sensible) — CONFIRMADA en Clarifications
+Session 2026-09-08**: Ante una expiración de sesión detectada durante una acción sensible (eliminar,
+banear, promover), el frontend admin **cancela la acción en curso**, descarta cualquier confirmación
+pendiente y redirige al login, mostrando un mensaje de "sesión expirada, la acción no fue aplicada". Esto
+evita dejar al usuario en un estado ambiguo sobre si la acción se ejecutó. Decisión definitiva, no
+requiere validación adicional de negocio.
 
 **Alternativas consideradas**:
 - *Reintentar automáticamente tras reautenticación silenciosa*: rechazada por mayor complejidad y porque
@@ -65,53 +65,64 @@ reportes sin degradar la experiencia del administrador.
 
 ## 4. Exportación de reportes/analíticas
 
-**Decisión**: Se modela la exportación como un flujo de **dos pasos**: (1) el frontend admin solicita
-iniciar la exportación (`POST /api/admin/reportes/exportaciones`), recibiendo un identificador de trabajo
-de exportación; (2) el frontend admin consulta el estado de ese trabajo (`GET
-/api/admin/reportes/exportaciones/{id}`) mediante **polling manual/periódico simple** hasta que el estado
-sea "LISTO", momento en el cual se habilita la descarga (`GET
-/api/admin/reportes/exportaciones/{id}/descarga`).
+**Decisión (actualizada — CONFIRMADA en Clarifications Session 2026-09-08, reemplaza la decisión
+original de flujo en dos pasos)**: La exportación de un reporte/analítica se modela como una operación
+**síncrona de un solo paso**: el frontend admin invoca `POST /reportes-analiticas/exportaciones` y la
+respuesta de esa misma llamada entrega directamente el resultado: o bien los datos/enlace del archivo
+generado (éxito), o un error explícito si la generación falló. No existe un estado intermedio "en
+proceso" ni un endpoint de consulta de estado por polling.
 
-**Rationale**: Resuelve el punto `NEEDS CLARIFICATION` (FR-028) asumiendo que la generación de archivos
-de reportes (Python/openpyxl-XlsxWriter) es un proceso potencialmente no instantáneo, y que el frontend
-admin no debe implementar dicha generación (fuera de alcance), solo orquestar la solicitud y descarga.
-Un mecanismo de polling simple evita introducir infraestructura de tiempo real (WebSockets/SSE) que no
-está justificada para un flujo de uso administrativo poco frecuente.
+**Rationale**: Resuelve FR-028 conforme a la decisión de negocio registrada en `spec.md` (Clarifications,
+Session 2026-09-08, pregunta 3, opción B). Simplifica el diseño del frontend admin (no requiere manejar
+un estado `EN_PROCESO` ni loops de polling), a costa de que la request de exportación puede tardar más en
+responder mientras el backend/módulo Python genera el archivo. Esto es aceptable dado el bajo volumen de
+uso administrativo esperado (Scale/Scope de `plan.md`).
+
+**Manejo de fallos**: Si la generación falla, el backend responde con un error (p. ej. 500/502) y el
+frontend admin muestra el mensaje **"Error: Reporte no generado."** (Clarifications, Session 2026-09-08,
+pregunta opcional 3), sin reintentos automáticos.
 
 **Alternativas consideradas**:
+- *Flujo asíncrono de dos pasos con polling manual* (decisión original de este documento, ahora
+  reemplazada): se descartó tras la clarificación de negocio, que definió explícitamente un
+  comportamiento síncrono.
 - *Notificaciones push/WebSocket*: rechazada por complejidad desproporcionada para este caso de uso de
   baja frecuencia (Principio VI, "no forzar patrones donde una solución simple alcance").
-- *Generación siempre síncrona*: rechazada porque no se puede garantizar que el backend/módulo Python
-  genere el archivo de forma instantánea para volúmenes grandes de datos.
+
+**Impacto en diseño**: Esta decisión **elimina** la necesidad del enum `EstadoExportacionReporte` y de un
+endpoint de consulta de estado de exportación; ver actualización correspondiente en `data-model.md` y
+`contracts/openapi.yaml`.
 
 ## 5. Acciones administrativas entre administradores / sobre uno mismo
 
-**Decisión de diseño (a confirmar con negocio)**: Se asume, como resolución provisional del punto
-`NEEDS CLARIFICATION` (FR-029), que:
-- Un administrador **no puede banearse ni eliminarse a sí mismo** desde la interfaz (la acción debe
-  deshabilitarse visualmente cuando el usuario objetivo coincide con el usuario autenticado).
-- Un administrador **sí puede** banear/eliminar a otro administrador, dado que no se especificó una
-  restricción explícita en contrario, pero esta acción se considera de máxima sensibilidad y debe
-  distinguirse visualmente con el mismo criterio que las demás acciones destructivas.
+**Decisión (actualizada — CONFIRMADA en Clarifications Session 2026-09-08, opción B, reemplaza la
+decisión provisional original de este documento)**: Las acciones de **banear** y **eliminar** MUST
+aplicarse únicamente sobre usuarios con rol `USER`. Si el usuario objetivo tiene rol `ADMIN` —incluido el
+caso en que sea el propio administrador autenticado (auto-baneo/auto-eliminación)— la acción debe estar
+**deshabilitada en la interfaz** y **rechazada por el backend** si se invoca igualmente (p. ej. mediante
+llamada directa a la API). La promoción a `ADMIN` sobre un usuario que ya tiene ese rol se rechaza como
+operación inválida (no-op), independientemente de esta decisión.
 
-**Rationale**: Minimiza el riesgo de que un administrador quede accidentalmente sin acceso al sistema
-(auto-bloqueo), mientras se mantiene la flexibilidad operativa entre administradores. Esta es una
-decisión de diseño explícita que debe validarse en la fase de clarificación de negocio; se documenta
-aquí para que el diseño de datos y contratos sea consistente, no para cerrar la ambigüedad de forma
-definitiva.
+**Rationale**: Elimina por completo el riesgo de que un administrador actúe sobre otro administrador
+(conflictos de poder entre pares) y el riesgo de auto-bloqueo, priorizando una política más restrictiva y
+simple de razonar y testear: "banear/eliminar solo aplica a USER". Reemplaza la decisión previa de este
+documento, que permitía acciones entre administradores (opción A original), tras la clarificación de
+negocio que optó explícitamente por la opción más restrictiva (opción B).
+
+**Impacto en diseño**: `Usuario.puedeSerBaneado()` y `Usuario.puedeSerEliminado()` en `data-model.md`
+deben incluir la condición `rol === USER` (no solo el estado de cuenta); ver actualización
+correspondiente.
 
 ## 6. Descarte de reportes sin eliminar publicación
 
-**Decisión**: Se incorpora al diseño una acción adicional, **"marcar reporte como resuelto sin eliminar
-la publicación"**, como parte del flujo de moderación, resolviendo el punto `NEEDS CLARIFICATION`
-(FR-026). Esta acción cambia el estado del **reporte** (no de la publicación) a un estado de cierre,
-dejando la publicación en su estado actual (por ejemplo, `ACTIVA` si nunca se marcó como `REPORTADA` a
-nivel de publicación, o permitiendo que una publicación con reportes resueltos dependa del backend para
-decidir si permanece `REPORTADA` o vuelve a `ACTIVA`).
+**Decisión (CONFIRMADA en Clarifications Session 2026-09-08)**: Se incorpora al diseño una acción
+adicional, **"marcar reporte como resuelto sin eliminar la publicación"**, como parte del flujo de
+moderación, resolviendo FR-026. Esta acción cambia el estado del **reporte** (no de la publicación) a un
+estado de cierre, dejando la publicación en su estado actual.
 
 **Rationale**: Sin esta acción, el moderador se vería forzado a elegir entre "eliminar" o "no hacer nada"
-ante un reporte infundado, lo cual no es una experiencia de moderación razonable. Se documenta como
-supuesto de diseño a validar con negocio.
+ante un reporte infundado, lo cual no es una experiencia de moderación razonable. Decisión confirmada por
+negocio, ya no es un supuesto abierto.
 
 **Alternativas consideradas**:
 - *No incluir esta acción* (dejar el reporte "abierto" indefinidamente si no se elimina la publicación):
@@ -119,13 +130,26 @@ supuesto de diseño a validar con negocio.
 
 ## 7. Definición operativa de "usuarios activos" (dashboard)
 
-**Decisión**: Para efectos de este diseño, "usuarios activos" se define como usuarios cuya cuenta no está
-baneada ni eliminada (`estadoCuenta = ACTIVO`), sin considerar actividad reciente. Esta definición es un
-supuesto de diseño documentado en `spec.md` (Assumptions) y se mantiene consistente en `data-model.md` y
-`contracts/openapi.yaml`.
+**Decisión (CONFIRMADA en Clarifications Session 2026-09-08)**: "Usuarios activos" se define como
+usuarios cuya cuenta no está baneada ni eliminada (`estadoCuenta = ACTIVO`), sin considerar actividad
+reciente. Esta definición está confirmada en `spec.md` (Assumptions) y se mantiene consistente en
+`data-model.md` y `contracts/openapi.yaml`.
 
 **Rationale**: Es la interpretación más simple y verificable con los datos ya identificados en la spec,
 evitando introducir un concepto adicional (ventana temporal de actividad) no solicitado explícitamente.
+
+## 7bis. Indicadores generales del Dashboard
+
+**Decisión (CONFIRMADA en Clarifications Session 2026-09-08)**: Además de los 3 indicadores base
+(reportes pendientes, usuarios activos, desafíos pendientes), el dashboard MUST mostrar un conjunto fijo
+de indicadores generales adicionales: **total de publicaciones activas**, **total de publicaciones
+eliminadas** (histórico), **total de usuarios baneados**, y **total de desafíos aprobados/rechazados**
+(histórico). Estos 7 indicadores en total conforman el contrato de `GET /dashboard` (ver
+`contracts/openapi.yaml`).
+
+**Rationale**: Resuelve la ambigüedad original sobre "indicadores generales" con un conjunto cerrado y
+verificable, evitando un diseño de UI genérico/dinámico no testeable de forma consistente (ver opción C
+descartada en la sesión de clarificación).
 
 ## 8. Patrón contenedor/presentacional en moderación
 
@@ -141,12 +165,18 @@ de la constitución ("aplicar patrones solo si simplifican el diseño").
 - *Aplicar el mismo patrón a todas las pantallas*: rechazada por sobre-ingeniería en pantallas simples
   (login, detalle de desafío).
 
-## Resumen de decisiones pendientes de confirmación por negocio
+## Resumen de decisiones (todas CONFIRMADAS en Clarifications Session 2026-09-08)
 
-| # | Punto `NEEDS CLARIFICATION` origen | Decisión de diseño adoptada | Debe confirmarse antes de |
-|---|---|---|---|
-| 1 | FR-026 (descartar reporte) | Se agrega acción "resolver reporte sin eliminar" | Fase de tasks/implementación |
-| 2 | FR-027 (sesión expira en acción sensible) | Cancelar acción y redirigir a login | Fase de tasks/implementación |
-| 3 | FR-028 (exportación síncrona/asíncrona) | Flujo de 2 pasos con polling manual | Fase de tasks/implementación |
-| 4 | FR-029 (acciones entre administradores) | Auto-bloqueo prohibido; entre admins permitido | Fase de tasks/implementación |
-| 5 | "Usuarios activos" (Assumptions) | Cuenta no baneada ni eliminada | Fase de tasks/implementación |
+| # | Punto origen | Decisión de diseño confirmada |
+|---|---|---|
+| 1 | FR-026 (descartar reporte) | Se agrega acción "resolver reporte sin eliminar" |
+| 2 | FR-027 (sesión expira en acción sensible) | Cancelar acción y redirigir a login |
+| 3 | FR-028 (exportación síncrona/asíncrona) | **Síncrona, un solo paso** (reemplaza decisión previa de polling) |
+| 4 | FR-029 (acciones entre administradores) | **Prohibidas por completo sobre ADMIN** (incluye auto-baneo/eliminación); reemplaza decisión previa que permitía acciones entre pares |
+| 5 | "Usuarios activos" (Assumptions) | Cuenta no baneada ni eliminada |
+| 6 | Indicadores generales del Dashboard | Conjunto fijo de 4 indicadores adicionales (§7bis) |
+| 7 | Decisión final de desafíos (US5) | Aprobar/rechazar es irreversible |
+| 8 | Fallo de exportación | Mensaje "Error: Reporte no generado." |
+
+Todas las decisiones de este documento están ahora alineadas 1:1 con `spec.md` § Clarifications
+(Session 2026-09-08) y no requieren validación adicional de negocio.

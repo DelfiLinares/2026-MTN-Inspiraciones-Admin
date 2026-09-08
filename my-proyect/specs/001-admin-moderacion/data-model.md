@@ -37,20 +37,22 @@ habilitadas (FR-014, FR-015, FR-016, US5).
 Valores (cerrados, alineados a motivos típicos de moderación de contenido artístico):
 `CONTENIDO_INAPROPIADO`, `SPAM`, `PLAGIO`, `DISCURSO_DE_ODIO`, `OTRO`.
 Uso: clasifica el motivo de un reporte sobre una publicación, usado en filtros de la pantalla de
-moderación (FR-008, FR-009, US2).
-[NEEDS CLARIFICATION heredado de spec.md: la lista cerrada de motivos no está definida por negocio; se
-adopta un conjunto razonable a validar antes de la fase de tasks].
+moderación (FR-008, FR-009, US2). Conjunto adoptado como definitivo para esta versión del módulo.
 
 ### EstadoReporte
 Valores: `PENDIENTE`, `RESUELTO_SIN_ELIMINAR`, `RESUELTO_CON_ELIMINACION`.
-Uso: introducido para soportar la decisión de diseño de `research.md` §6 (descartar reporte sin eliminar
-publicación), resolviendo FR-026. Permite calcular "reportes pendientes" en el dashboard (US4) sin
-depender únicamente del estado de la publicación.
+Uso: introducido para soportar la decisión confirmada en `research.md` §6 (descartar reporte sin
+eliminar publicación), resolviendo FR-026. Permite calcular "reportes pendientes" en el dashboard (US4)
+sin depender únicamente del estado de la publicación.
 
-### EstadoExportacionReporte
-Valores: `EN_PROCESO`, `LISTO`, `ERROR`.
-Uso: representa el estado del trabajo de exportación de un reporte/analítica (US6, FR-018, FR-019,
-resolviendo FR-028 según `research.md` §4).
+~~### EstadoExportacionReporte~~ *(ELIMINADO — ver nota abajo)*
+
+> **Cambio respecto a la versión anterior de este documento**: Tras la decisión confirmada en
+> `spec.md` (Clarifications, Session 2026-09-08) de que la exportación de reportes es **síncrona**
+> (`research.md` §4), el enum `EstadoExportacionReporte` (`EN_PROCESO`, `LISTO`, `ERROR`) **ya no es
+> necesario**: no existe un estado intermedio observable por el cliente. La entidad `ExportacionReporte`
+> se simplifica más abajo para reflejar un resultado inmediato (éxito con `urlDescarga`, o error con
+> `mensajeError`).
 
 ## Entidades de Dominio de UI
 
@@ -68,10 +70,18 @@ Representa a un usuario de la plataforma desde la perspectiva del módulo admini
 **Reglas de negocio encapsuladas** (no anémico, Principio II):
 - `puedeSerPromovidoAAdmin(): boolean` → `true` si `rol === USER` y `estadoCuenta === ACTIVO`.
   Referencia: FR-007, US3.
-- `puedeSerBaneado(): boolean` → `true` si `estadoCuenta === ACTIVO`. Referencia: FR-005.
-- `puedeSerEliminado(): boolean` → `true` si `estadoCuenta !== ELIMINADO`. Referencia: FR-006.
-- `esElMismoQue(otroUsuarioId: string): boolean` → soporta la regla de "no auto-banearse/auto-eliminarse"
-  de `research.md` §5 (FR-029).
+- `puedeSerBaneado(): boolean` → `true` si `rol === USER` y `estadoCuenta === ACTIVO`. **Actualizado**
+  (Clarifications Session 2026-09-08, FR-029): ya no basta con verificar el estado de cuenta; un usuario
+  con `rol === ADMIN` **nunca** puede ser baneado desde este módulo, sin excepción (ni siquiera por otro
+  ADMIN). Referencia: FR-005, FR-029.
+- `puedeSerEliminado(): boolean` → `true` si `rol === USER` y `estadoCuenta !== ELIMINADO`.
+  **Actualizado** (Clarifications Session 2026-09-08, FR-029): igual que `puedeSerBaneado()`, un usuario
+  con `rol === ADMIN` nunca puede ser eliminado desde este módulo. Referencia: FR-006, FR-029.
+- `esElMismoQue(otroUsuarioId: string): boolean` → método auxiliar de comparación de identidad. Ya no es
+  la única defensa contra auto-baneo/auto-eliminación: dado que todo `ADMIN` está protegido por
+  `puedeSerBaneado()`/`puedeSerEliminado()` (que exigen `rol === USER`), el caso de auto-acción queda
+  cubierto automáticamente si el actor es ADMIN. Se mantiene disponible para trazas de auditoría o
+  mensajes de UI más específicos ("no podés aplicar esta acción sobre tu propia cuenta").
 - Regla de **permiso de ejecución** (no del propio objeto `Usuario` sino del actor): solo un `Usuario`
   cuyo `rol === ADMIN` puede invocar `puedeSerPromovidoAAdmin`/baneo/eliminación sobre otro `Usuario`;
   esta verificación se modela en la capa de servicios (`UsuariosService`), no en la entidad, porque
@@ -134,8 +144,9 @@ Representa una propuesta de desafío enviada por un usuario para revisión admin
 - `estaPendiente(): boolean` → `estado === PENDIENTE`. Referencia: US5.
 - `puedeAprobarse(): boolean` → `estado === PENDIENTE`. Referencia: FR-014.
 - `puedeRechazarse(): boolean` → `estado === PENDIENTE`. Referencia: FR-015.
-  (Ambas reglas reflejan la decisión de `research.md` que considera la decisión final una vez aprobado/
-  rechazado — punto `NEEDS CLARIFICATION` de la spec, US5 escenario 5).
+  (**Confirmado** en Clarifications Session 2026-09-08: la decisión de aprobar/rechazar es final e
+  irreversible; una vez que `estado !== PENDIENTE`, ambos métodos devuelven `false` de forma permanente,
+  sin mecanismo de reversión).
 
 ### SesionAdministrativa
 Representa el contexto de autenticación de un administrador durante su interacción con el módulo.
@@ -148,6 +159,22 @@ Representa el contexto de autenticación de un administrador durante su interacc
 **Reglas de negocio encapsuladas**:
 - `esValida(fechaActual: Date): boolean` → `expiraEn > fechaActual`.
 - `tienePermisoDeAdministrador(): boolean` → `usuario.rol === ADMIN`. Referencia: FR-002, FR-020.
+
+### DashboardIndicadores
+Representa el resumen de indicadores mostrado en el dashboard administrativo (US4). **Nuevo en esta
+revisión** (Clarifications Session 2026-09-08, `research.md` §7bis).
+
+**Atributos** (los 3 originales + los 4 confirmados como conjunto fijo adicional):
+- `reportesPendientes: number`
+- `usuariosActivos: number`
+- `desafiosPendientes: number`
+- `publicacionesActivas: number`
+- `publicacionesEliminadas: number`
+- `usuariosBaneados: number`
+- `desafiosDecididos: number` (suma de aprobados + rechazados, histórico)
+
+**Reglas de negocio encapsuladas**: Ninguna (datos ya agregados por el backend); solo métodos de
+presentación triviales si se requieren (p. ej. `tieneAlertas(): boolean` → `reportesPendientes > 0`).
 
 ### ReporteAnalitica (Reporte/Analítica Exportable)
 Representa un conjunto de datos agregados generados por el backend, disponible para visualización y
@@ -164,17 +191,20 @@ exportación.
   `tieneDatos(): boolean`.
 
 ### ExportacionReporte
-Representa un trabajo de exportación solicitado por el administrador.
+Representa el **resultado inmediato y síncrono** de una solicitud de exportación (Clarifications
+Session 2026-09-08, `research.md` §4). **Simplificado respecto a la versión anterior**: ya no modela un
+trabajo en curso con estados intermedios, sino el resultado directo de la operación.
 
 **Atributos**:
-- `id: string`
 - `reporteAnaliticaId: string`
-- `estado: EstadoExportacionReporte`
-- `urlDescarga: string | null`
+- `exitoso: boolean`
+- `urlDescarga: string | null` (presente solo si `exitoso === true`)
+- `mensajeError: string | null` (presente solo si `exitoso === false`; valor esperado por defecto:
+  `"Error: Reporte no generado."`, según Clarifications Session 2026-09-08)
 
 **Reglas de negocio encapsuladas**:
-- `estaListoParaDescargar(): boolean` → `estado === LISTO && urlDescarga !== null`. Referencia: FR-019.
-- `fallo(): boolean` → `estado === ERROR`.
+- `estaListoParaDescargar(): boolean` → `exitoso === true && urlDescarga !== null`. Referencia: FR-019.
+- `fallo(): boolean` → `exitoso === false`. Referencia: FR-028, mensaje de error confirmado.
 
 ## Diagrama de relaciones (conceptual)
 
@@ -194,4 +224,10 @@ ReporteAnalitica (1) ──origina──> (N) ExportacionReporte
 | Reporte, MotivoReporte, EstadoReporte | FR-008, FR-009, FR-025, FR-026, US2, US4 |
 | Desafio, EstadoDesafioPropuesto | FR-012, FR-013, FR-014, FR-015, FR-016, US5 |
 | SesionAdministrativa | FR-001, FR-002, FR-020, FR-027, US1 |
-| ReporteAnalitica, ExportacionReporte, EstadoExportacionReporte | FR-017, FR-018, FR-019, FR-028, US6 |
+| DashboardIndicadores | FR-003, US4 |
+| ReporteAnalitica, ExportacionReporte | FR-017, FR-018, FR-019, FR-028, US6 |
+
+**Nota de versión**: Esta tabla y el documento completo reflejan las decisiones confirmadas en
+`spec.md` § Clarifications (Session 2026-09-08). El enum `EstadoExportacionReporte` fue **retirado** del
+modelo (exportación ahora síncrona) y se agregó la entidad `DashboardIndicadores` (indicadores generales
+confirmados).

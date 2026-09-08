@@ -17,13 +17,13 @@ cliente ninguna lógica de negocio que corresponda al servidor (persistencia, ge
 recomendaciones, envío de mails, generación de archivos de reportes).
 
 El enfoque técnico consiste en:
-- Definir contratos de API REST (`contracts/openapi.yaml`) para las 15 operaciones administrativas
+- Definir contratos de API REST (`contracts/openapi.yaml`) para las operaciones administrativas
   identificadas en la spec (auth admin, dashboard, usuarios, publicaciones/reportes, desafíos, reportes/
-  analíticas y exportación).
+  analíticas y exportación síncrona).
 - Modelar el dominio de UI (`data-model.md`) con entidades livianas orientadas a objetos (`Usuario`,
-  `Publicacion`, `Reporte`, `Desafio`) y enums (`RolUsuario`, `EstadoPublicacion`,
-  `EstadoDesafioPropuesto`, `MotivoReporte`) que encapsulan las reglas de permisos y transición de
-  estados descriptas en la spec.
+  `Publicacion`, `Reporte`, `Desafio`, `ExportacionReporte`) y enums (`RolUsuario`, `EstadoCuentaUsuario`,
+  `EstadoPublicacion`, `EstadoDesafioPropuesto`, `MotivoReporte`, `EstadoReporte`) que encapsulan las
+  reglas de permisos y transición de estados descriptas en la spec.
 - Documentar decisiones técnicas y alternativas evaluadas (`research.md`) para resolver los puntos
   `NEEDS CLARIFICATION` heredados de la especificación que impactan el diseño (sesión, exportación
   asíncrona, acciones entre administradores, etc.), dejando explícitas las decisiones asumidas.
@@ -88,7 +88,7 @@ Evaluado contra `.specify/memory/constitution.md` (Inspiraciones Admin Constitut
 | II. Dominio de UI orientado a objetos | ✅ PASS. `data-model.md` define `Usuario`, `Publicacion`, `Reporte`, `Desafio` como clases con métodos de negocio (`puedeSerPromovido()`, `estaReportada()`, `puedeAprobarse()`, etc.), no como DTOs anémicos. |
 | III. Separación de capas (NON-NEGOTIABLE) | ✅ PASS. La estructura de proyecto (`frontend-admin/src/{presentation,domain,application,infrastructure}`) refleja explícitamente las 4 capas exigidas; ningún componente de presentación llama directamente a fetch/axios. |
 | IV. Sin duplicación ni componentes gigantes | ✅ PASS (a validar en fase de tasks). Se planifican servicios de aplicación reutilizables por pantalla en lugar de lógica repetida por componente. |
-| V. Value objects y enums tipados | ✅ PASS. `RolUsuario`, `EstadoPublicacion`, `EstadoDesafioPropuesto`, `MotivoReporte` se documentan como enums en `data-model.md` y se reflejan en `contracts/openapi.yaml` como esquemas `enum`. |
+| V. Value objects y enums tipados | ✅ PASS. `RolUsuario`, `EstadoCuentaUsuario`, `EstadoPublicacion`, `EstadoDesafioPropuesto`, `MotivoReporte`, `EstadoReporte` se documentan como enums en `data-model.md` y se reflejan en `contracts/openapi.yaml` como esquemas `enum`. (Nota: `EstadoExportacionReporte` fue eliminado en Clarifications Session 2026-09-08 al confirmarse que la exportación de reportes es síncrona.) |
 | VI. Patrones de diseño con criterio | ✅ PASS. Se propone un patrón contenedor/presentacional únicamente para la pantalla de moderación de publicaciones/reportes (filtrado complejo), no se fuerza en pantallas simples. |
 | VII. Tests para reglas de negocio (NON-NEGOTIABLE) | ✅ PASS (a nivel de plan). `quickstart.md` y la sección de Testing de este plan detallan qué reglas requieren test unitario/integración; la ejecución real de tests se define en la fase de tasks. |
 | Escalabilidad y eficiencia operativa | ✅ PASS. Todos los listados planificados usan paginación/filtros server-side (ver `contracts/openapi.yaml`); analíticas consumen datos ya agregados por el backend (no se recalculan en cliente). |
@@ -138,14 +138,15 @@ frontend-admin/                   # Módulo planificado en este documento
 │   │   ├── Publicacion.ts
 │   │   ├── Reporte.ts
 │   │   ├── Desafio.ts
-│   │   └── enums/               # RolUsuario, EstadoPublicacion, EstadoDesafioPropuesto, MotivoReporte
+│   │   └── enums/               # RolUsuario, EstadoCuentaUsuario, EstadoPublicacion,
+│   │                             # EstadoDesafioPropuesto, MotivoReporte, EstadoReporte
 │   ├── application/             # Servicios / casos de uso administrativos
 │   │   ├── AuthAdminService.ts
 │   │   ├── DashboardService.ts
 │   │   ├── UsuariosService.ts
 │   │   ├── ModeracionService.ts
 │   │   ├── DesafiosService.ts
-│   │   └── ReportesService.ts
+│   │   └── ReportesAnaliticaService.ts
 │   └── infrastructure/          # Cliente HTTP, sesión y permisos
 │       ├── httpClient.ts
 │       ├── sessionManager.ts

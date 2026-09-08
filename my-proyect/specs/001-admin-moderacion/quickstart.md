@@ -57,14 +57,19 @@ extremo-a-extremo (E2E) que se ejecutará después de las fases de `tasks` e `im
    y que, tras confirmar, el usuario pasa a rol `ADMIN` (FR-007, FR-022).
 6. Verificar visualmente que las acciones banear/eliminar/promover se distinguen de las acciones de solo
    consulta (color/iconografía distintos) (FR-023).
-7. Intentar (si aplica según research.md §5) que un administrador se banee/elimine a sí mismo: verificar
-   que la acción está deshabilitada o rechazada.
+7. Sobre un usuario de prueba con rol `ADMIN` (incluido el propio usuario autenticado), verificar que las
+   acciones "banear" y "eliminar" están deshabilitadas o son rechazadas por el backend, ya que estas
+   acciones solo aplican a usuarios con rol `USER` (FR-005, FR-006, FR-029, Clarifications Session
+   2026-09-08, preguntas 2.1/2.2).
+8. Sobre un usuario de prueba que ya tiene rol `ADMIN`, intentar "promover a administrador": verificar que
+   la acción es rechazada como no-op (409) (FR-007, Clarifications Session 2026-09-08, pregunta 2.3).
 
 ## Escenario 4: Dashboard administrativo (US4, P2)
 
 1. Iniciar sesión como `ADMIN` y observar el dashboard inicial.
-2. Verificar que se muestran: cantidad de reportes pendientes, usuarios activos, desafíos pendientes de
-   revisión, e indicadores generales (FR-003).
+2. Verificar que se muestran los 7 indicadores confirmados (FR-003, research.md §7bis):
+   reportes pendientes, usuarios activos, desafíos pendientes de revisión, publicaciones activas,
+   publicaciones eliminadas, usuarios baneados y desafíos decididos (aprobados + rechazados).
 3. Verificar que los valores mostrados son consistentes con los datos de prueba cargados (ninguna
    recalculación visible en el cliente; los números coinciden con lo agregado por la API).
 
@@ -83,11 +88,14 @@ extremo-a-extremo (E2E) que se ejecutará después de las fases de `tasks` e `im
 
 1. Navegar a la pantalla de reportes/analíticas y verificar que se muestran datos agregados (FR-017).
 2. Iniciar una exportación de un reporte disponible (FR-018).
-3. Verificar que el sistema comunica el estado "en proceso" mientras el archivo no está listo
-   (research.md §4, FR-028).
-4. Una vez que el estado pasa a "listo" (o simulado en entorno de pruebas), verificar que se ofrece una
-   acción clara de descarga (FR-019).
+3. Verificar que la exportación es **síncrona** (research.md §4, Clarifications Session 2026-09-08,
+   pregunta 3): no existe un estado intermedio "en proceso"; la respuesta de la acción ya trae el
+   resultado final (éxito o error).
+4. En el caso de éxito, verificar que se ofrece de inmediato una acción clara de descarga (FR-019).
 5. Descargar el archivo y verificar que se recibe correctamente.
+6. Simular (o forzar en entorno de pruebas) un fallo de generación del reporte y verificar que se muestra
+   el mensaje exacto **"Error: Reporte no generado."** (FR-028, Clarifications Session 2026-09-08,
+   pregunta 3).
 
 ## Criterios de éxito de esta validación manual
 

@@ -110,7 +110,10 @@ paths:
   /usuarios/{usuarioId}/banear:
     post:
       tags: [Usuarios]
-      summary: Banear a un usuario (FR-005). Requiere confirmación explícita en el cliente antes de invocar.
+      summary: >
+        Banear a un usuario con rol USER (FR-005, FR-029). Requiere confirmación explícita en el
+        cliente antes de invocar. Prohibido si el usuario objetivo tiene rol ADMIN (incluido el propio
+        actor autenticado): ver Clarifications Session 2026-09-08.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/UsuarioId"
@@ -125,7 +128,9 @@ paths:
         "404": { $ref: "#/components/responses/NoEncontrado" }
         "409":
           description: >
-            Conflicto de negocio, p. ej. intento de banear a sí mismo (research.md §5, FR-029).
+            Conflicto de negocio: el usuario objetivo tiene rol ADMIN (incluido auto-baneo). Esta
+            acción MUST rechazarse siempre que el objetivo no tenga rol USER (research.md §5, FR-029,
+            Clarifications Session 2026-09-08).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -133,7 +138,10 @@ paths:
   /usuarios/{usuarioId}:
     delete:
       tags: [Usuarios]
-      summary: Eliminar a un usuario (FR-006). Requiere confirmación explícita en el cliente antes de invocar.
+      summary: >
+        Eliminar a un usuario con rol USER (FR-006, FR-029). Requiere confirmación explícita en el
+        cliente antes de invocar. Prohibido si el usuario objetivo tiene rol ADMIN (incluido el propio
+        actor autenticado): ver Clarifications Session 2026-09-08.
       security: [{ bearerAuth: [] }]
       parameters:
         - $ref: "#/components/parameters/UsuarioId"
@@ -144,7 +152,10 @@ paths:
         "403": { $ref: "#/components/responses/SinPermiso" }
         "404": { $ref: "#/components/responses/NoEncontrado" }
         "409":
-          description: Conflicto de negocio, p. ej. intento de eliminarse a sí mismo (FR-029).
+          description: >
+            Conflicto de negocio: el usuario objetivo tiene rol ADMIN (incluido auto-eliminación).
+            Esta acción MUST rechazarse siempre que el objetivo no tenga rol USER (FR-029,
+            Clarifications Session 2026-09-08).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -167,6 +178,13 @@ paths:
         "401": { $ref: "#/components/responses/NoAutenticado" }
         "403": { $ref: "#/components/responses/SinPermiso" }
         "404": { $ref: "#/components/responses/NoEncontrado" }
+        "409":
+          description: >
+            El usuario objetivo ya tiene rol ADMIN (FR-007, Clarifications Session 2026-09-08,
+            pregunta 2.3). La acción es un no-op rechazado por el backend.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /publicaciones/reportadas:
     get:
@@ -349,7 +367,11 @@ paths:
   /reportes-analiticas/exportaciones:
     post:
       tags: [Reportes]
-      summary: Iniciar la exportación de un reporte/analítica (FR-018, research.md §4)
+      summary: >
+        Solicitar la exportación de un reporte/analítica de forma SÍNCRONA (FR-018, FR-028,
+        research.md §4, Clarifications Session 2026-09-08). La respuesta de esta misma llamada entrega
+        directamente el resultado: el enlace de descarga (éxito) o un error (fallo de generación). No
+        existe estado intermedio "en proceso" ni endpoint de consulta de estado.
       security: [{ bearerAuth: [] }]
       requestBody:
         required: true
@@ -362,38 +384,27 @@ paths:
                 reporteAnaliticaId:
                   type: string
       responses:
-        "202":
-          description: Exportación aceptada, en proceso.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ExportacionReporte" }
-        "401": { $ref: "#/components/responses/NoAutenticado" }
-        "403": { $ref: "#/components/responses/SinPermiso" }
-
-  /reportes-analiticas/exportaciones/{exportacionId}:
-    get:
-      tags: [Reportes]
-      summary: Consultar el estado de una exportación de reporte (FR-028, research.md §4)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - in: path
-          name: exportacionId
-          required: true
-          schema: { type: string }
-      responses:
         "200":
-          description: Estado actual de la exportación.
+          description: Exportación generada exitosamente; incluye el enlace de descarga.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ExportacionReporte" }
         "401": { $ref: "#/components/responses/NoAutenticado" }
         "403": { $ref: "#/components/responses/SinPermiso" }
-        "404": { $ref: "#/components/responses/NoEncontrado" }
+        "502":
+          description: >
+            Fallo al generar el archivo de reporte en el backend/módulo de reportes. El frontend admin
+            MUST mostrar el mensaje "Error: Reporte no generado." (Clarifications Session 2026-09-08).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /reportes-analiticas/exportaciones/{exportacionId}/descarga:
     get:
       tags: [Reportes]
-      summary: Descargar el archivo de reporte exportado, una vez en estado LISTO (FR-019)
+      summary: >
+        Descargar el archivo de reporte exportado previamente generado (FR-019). Disponible
+        inmediatamente después de una respuesta 200 de `POST /reportes-analiticas/exportaciones`.
       security: [{ bearerAuth: [] }]
       parameters:
         - in: path
@@ -411,11 +422,6 @@ paths:
         "401": { $ref: "#/components/responses/NoAutenticado" }
         "403": { $ref: "#/components/responses/SinPermiso" }
         "404": { $ref: "#/components/responses/NoEncontrado" }
-        "409":
-          description: La exportación aún no está en estado LISTO.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
 
 components:
   securitySchemes:
@@ -503,10 +509,6 @@ components:
       type: string
       enum: [PENDIENTE, RESUELTO_SIN_ELIMINAR, RESUELTO_CON_ELIMINACION]
 
-    EstadoExportacionReporte:
-      type: string
-      enum: [EN_PROCESO, LISTO, ERROR]
-
     Usuario:
       type: object
       properties:
@@ -525,14 +527,18 @@ components:
         usuario: { $ref: "#/components/schemas/Usuario" }
 
     DashboardIndicadores:
+      description: >
+        Conjunto fijo de indicadores del dashboard, confirmado en Clarifications Session 2026-09-08
+        (research.md §7bis). Reemplaza el campo genérico `indicadoresGenerales` de la versión anterior.
       type: object
       properties:
         reportesPendientes: { type: integer }
         usuariosActivos: { type: integer }
         desafiosPendientes: { type: integer }
-        indicadoresGenerales:
-          type: object
-          additionalProperties: { type: number }
+        publicacionesActivas: { type: integer }
+        publicacionesEliminadas: { type: integer }
+        usuariosBaneados: { type: integer }
+        desafiosDecididos: { type: integer, description: "Suma histórica de APROBADO + RECHAZADO." }
 
     PaginaUsuarios:
       type: object
@@ -612,11 +618,18 @@ components:
           additionalProperties: { type: number }
 
     ExportacionReporte:
+      description: >
+        Resultado SÍNCRONO de una exportación (research.md §4, Clarifications Session 2026-09-08).
+        Ya no existe estado intermedio "EN_PROCESO"; la respuesta ya trae el resultado final.
       type: object
       properties:
-        id: { type: string }
         reporteAnaliticaId: { type: string }
-        estado: { $ref: "#/components/schemas/EstadoExportacionReporte" }
+        exitoso: { type: boolean }
         urlDescarga:
           type: string
           nullable: true
+          description: "Presente únicamente cuando exitoso = true."
+        mensajeError:
+          type: string
+          nullable: true
+          description: 'Presente únicamente cuando exitoso = false. Valor por defecto: "Error: Reporte no generado."'

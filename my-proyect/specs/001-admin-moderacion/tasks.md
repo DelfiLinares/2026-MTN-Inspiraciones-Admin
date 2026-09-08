@@ -92,8 +92,10 @@ FR-010..FR-016, FR-025, FR-026, FR-029.
 - [ ] T011 [P] [FE] Crear enum `EstadoReporte` (`PENDIENTE`, `RESUELTO_SIN_ELIMINAR`,
   `RESUELTO_CON_ELIMINACION`) en `frontend-admin/src/domain/enums/EstadoReporte.ts`. Ref: FR-026,
   `research.md` §6.
-- [ ] T012 [P] [FE] Crear enum `EstadoExportacionReporte` (`EN_PROCESO`, `LISTO`, `ERROR`) en
-  `frontend-admin/src/domain/enums/EstadoExportacionReporte.ts`. Ref: FR-028, `research.md` §4.
+- [x] ~~T012~~ **ELIMINADA** — el enum `EstadoExportacionReporte` ya no existe: la exportación de
+  reportes es una operación **síncrona** (Clarifications Session 2026-09-08, pregunta 3; `research.md`
+  §4; `data-model.md` → `ExportacionReporte`). No reemplazar este ID; se mantiene documentado el motivo
+  de su eliminación por trazabilidad.
 
 ### Tests de reglas de dominio (escribir ANTES de las entidades; deben fallar primero)
 
@@ -110,8 +112,10 @@ FR-010..FR-016, FR-025, FR-026, FR-029.
 - [ ] T017 [P] [TEST] Test de reglas de `SesionAdministrativa` (`esValida`,
   `tienePermisoDeAdministrador`) en `frontend-admin/tests/domain/SesionAdministrativa.test.ts`. Ref:
   FR-002, FR-020.
-- [ ] T018 [P] [TEST] Test de reglas de `ExportacionReporte` (`estaListoParaDescargar`, `fallo`) en
-  `frontend-admin/tests/domain/ExportacionReporte.test.ts`. Ref: FR-019, FR-028.
+- [ ] T018 [P] [TEST] Test de reglas de `ExportacionReporte` (`estaListoParaDescargar` cuando
+  `exitoso === true`, `fallo` cuando `exitoso === false` con mensaje por defecto
+  "Error: Reporte no generado.") en `frontend-admin/tests/domain/ExportacionReporte.test.ts`. Ref:
+  FR-019, FR-028, Clarifications Session 2026-09-08 pregunta 3.
 
 ### Entidades de dominio (implementar después de que los tests de T013–T018 existan y fallen)
 
@@ -128,7 +132,8 @@ FR-010..FR-016, FR-025, FR-026, FR-029.
 - [ ] T024 [P] [FE] Implementar clase `ReporteAnalitica` en
   `frontend-admin/src/domain/ReporteAnalitica.ts` (sin reglas complejas; datos ya agregados). Ref: FR-017.
 - [ ] T025 [FE] Implementar clase `ExportacionReporte` en
-  `frontend-admin/src/domain/ExportacionReporte.ts` (depende de T012, T018). Hace pasar T018.
+  `frontend-admin/src/domain/ExportacionReporte.ts` (forma síncrona: `reporteAnaliticaId`, `exitoso`,
+  `urlDescarga`, `mensajeError`; depende de T018, no de T012 — eliminada). Hace pasar T018.
 
 **Checkpoint**: Dominio de UI completo y testeado de forma aislada (sin HTTP, sin React). Habilita Fase 3.
 
@@ -163,10 +168,12 @@ Ninguna llamada HTTP directa aquí: solo dependencia de una interfaz `HttpClient
   `GET /desafios`, `GET /desafios/{id}`, `POST /desafios/{id}/aprobar`, `POST /desafios/{id}/rechazar`,
   FR-012..FR-016.
 - [ ] T032 [P] [FE] Implementar `ReportesAnaliticaService` (`listarReportesAnaliticas`,
-  `iniciarExportacion`, `consultarEstadoExportacion`, `descargarExportacion`) en
-  `frontend-admin/src/application/ReportesAnaliticaService.ts` (depende de T024, T025, T026). Ref:
-  `GET /reportes-analiticas`, `POST /reportes-analiticas/exportaciones`,
-  `GET /reportes-analiticas/exportaciones/{id}`,
+  `iniciarExportacion`, `descargarExportacion`) en
+  `frontend-admin/src/application/ReportesAnaliticaService.ts` (depende de T024, T025, T026).
+  `iniciarExportacion` es **síncrono**: devuelve directamente el resultado final
+  (`ExportacionReporte { exitoso, urlDescarga, mensajeError }`), sin método de consulta de estado
+  intermedio (Clarifications Session 2026-09-08, pregunta 3). Ref: `GET /reportes-analiticas`,
+  `POST /reportes-analiticas/exportaciones`,
   `GET /reportes-analiticas/exportaciones/{id}/descarga`, FR-017..FR-019, FR-028.
 - [ ] T033 [FE] Implementar la regla de permiso de ejecución "solo ADMIN promueve a ADMIN" dentro de
   `UsuariosService.promover` (verificación del actor autenticado vía `AuthAdminService`, además de la
@@ -188,8 +195,10 @@ Ninguna llamada HTTP directa aquí: solo dependencia de una interfaz `HttpClient
 - [ ] T038 [P] [TEST] Test de `DesafiosService` (listar, detalle, aprobar, rechazar, y transición inválida
   sobre desafío ya decidido) en `frontend-admin/tests/application/DesafiosService.test.ts` (depende de
   T031).
-- [ ] T039 [P] [TEST] Test de `ReportesAnaliticaService` (listar, iniciar exportación, polling de estado,
-  descarga) en `frontend-admin/tests/application/ReportesAnaliticaService.test.ts` (depende de T032).
+- [ ] T039 [P] [TEST] Test de `ReportesAnaliticaService` (listar, iniciar exportación con resultado
+  síncrono exitoso, iniciar exportación con resultado síncrono fallido — mensaje
+  "Error: Reporte no generado." —, descarga) en
+  `frontend-admin/tests/application/ReportesAnaliticaService.test.ts` (depende de T032).
 
 **Checkpoint**: Casos de uso administrativos completos y testeados contra un `HttpClient` simulado.
 Habilita Fase 4 (en paralelo puede empezar antes si el equipo lo desea, ya que solo depende de la
@@ -257,6 +266,13 @@ pantallas específicas de cada dominio funcional (Fases 6–9).
 - [ ] T051 [FE] Implementar pantalla de login de administrador en
   `frontend-admin/src/presentation/login/LoginAdminPage.tsx` (usa `AuthAdminService` vía T044; sin fetch
   directo) (depende de T027, T044, T047). Ref: FR-001, FR-002, US1.
+- [ ] T051bis [FE] Implementar la pantalla de dashboard administrativo (`DashboardPage.tsx`), mostrando
+  los 7 indicadores confirmados (reportes pendientes, usuarios activos, desafíos pendientes,
+  publicaciones activas, publicaciones eliminadas, usuarios baneados, desafíos decididos) usando
+  `DashboardService.obtenerIndicadores()`, sin recálculo en cliente, en
+  `frontend-admin/src/presentation/dashboard/DashboardPage.tsx` (depende de T028, T044, T047). Ref:
+  FR-003, US4, `research.md` §7bis, Clarifications Session 2026-09-08 pregunta 4 (corrige brecha
+  detectada en `/speckit.analyze`: pantalla de Dashboard sin tarea de implementación).
 
 ### Tests de presentación (base)
 
@@ -268,9 +284,12 @@ pantallas específicas de cada dominio funcional (Fases 6–9).
 - [ ] T054 [P] [TEST] Test de `LoginAdminPage` (rechazo de USER, aceptación de ADMIN, error de
   credenciales) en `frontend-admin/tests/presentation/LoginAdminPage.test.tsx` (depende de T051). Ref:
   US1 (escenarios 1–3).
+- [ ] T054bis [P] [TEST] Test de `DashboardPage` (renderiza los 7 indicadores confirmados con los valores
+  devueltos por `DashboardService`, sin recálculo en cliente) en
+  `frontend-admin/tests/presentation/DashboardPage.test.tsx` (depende de T051bis). Ref: FR-003, US4.
 
-**Checkpoint**: Andamiaje de presentación, login y componentes de acción sensible listos. Habilita Fases
-6–9 en paralelo.
+**Checkpoint**: Andamiaje de presentación, login, dashboard y componentes de acción sensible listos.
+Habilita Fases 6–9 en paralelo.
 
 ---
 
@@ -284,12 +303,15 @@ pantallas específicas de cada dominio funcional (Fases 6–9).
   T029, T044, T047). Ref: FR-004, FR-024.
 - [ ] T056 [P] [FE] Implementar tabla presentacional `UsuariosTable` (solo props, sin llamadas a
   servicios) en `frontend-admin/src/presentation/usuarios/UsuariosTable.tsx` (depende de T019, T049).
-- [ ] T057 [FE] Implementar acción "banear" con `ModalConfirmacionExplicita` y `AccionSensibleButton` en
-  `frontend-admin/src/presentation/usuarios/BanearUsuarioAction.tsx` (depende de T050, T055). Ref: FR-005,
-  FR-021.
-- [ ] T058 [FE] Implementar acción "eliminar" con `ModalConfirmacionExplicita` en
-  `frontend-admin/src/presentation/usuarios/EliminarUsuarioAction.tsx` (depende de T050, T055). Ref:
-  FR-006, FR-021.
+- [ ] T057 [FE] Implementar acción "banear" con `ModalConfirmacionExplicita` y `AccionSensibleButton`,
+  deshabilitada/oculta cuando `usuario.puedeSerBaneado()` es falso (es decir, cuando el usuario objetivo
+  tiene rol `ADMIN`, incluido el propio actor autenticado) en
+  `frontend-admin/src/presentation/usuarios/BanearUsuarioAction.tsx` (depende de T019, T050, T055). Ref:
+  FR-005, FR-021, FR-029, Clarifications Session 2026-09-08 preguntas 2.1/2.2.
+- [ ] T058 [FE] Implementar acción "eliminar" con `ModalConfirmacionExplicita`, deshabilitada/oculta
+  cuando `usuario.puedeSerEliminado()` es falso (rol `ADMIN`, incluido el propio actor autenticado) en
+  `frontend-admin/src/presentation/usuarios/EliminarUsuarioAction.tsx` (depende de T019, T050, T055). Ref:
+  FR-006, FR-021, FR-029, Clarifications Session 2026-09-08 preguntas 2.1/2.2.
 - [ ] T059 [FE] Implementar acción "promover a administrador", visible únicamente si el actor autenticado
   tiene rol `ADMIN` y el usuario objetivo `puedeSerPromovidoAAdmin()`, con confirmación explícita, en
   `frontend-admin/src/presentation/usuarios/PromoverUsuarioAction.tsx` (depende de T019, T033, T050,
@@ -302,10 +324,11 @@ pantallas específicas de cada dominio funcional (Fases 6–9).
 - [ ] T061 [P] [TEST] Test de `PromoverUsuarioAction` verificando que la acción **no se renderiza** para
   un actor sin rol ADMIN en `frontend-admin/tests/presentation/PromoverUsuarioAction.test.tsx` (depende de
   T059). Ref: FR-007, SC-002.
-- [ ] T062 [P] [TEST] Test de `BanearUsuarioAction`/`EliminarUsuarioAction` verificando confirmación
-  explícita antes de invocar el servicio en
+- [ ] T062 [P] [TEST] Test de `BanearUsuarioAction`/`EliminarUsuarioAction` verificando (a) confirmación
+  explícita antes de invocar el servicio, y (b) que la acción está deshabilitada/oculta para **cualquier**
+  usuario objetivo con rol `ADMIN`, incluido el propio actor autenticado (no solo autobaneo) en
   `frontend-admin/tests/presentation/UsuarioAccionesDestructivas.test.tsx` (depende de T057, T058). Ref:
-  FR-021, SC-004.
+  FR-021, FR-029, SC-004, Clarifications Session 2026-09-08 preguntas 2.1/2.2.
 
 **Checkpoint**: US3 completa y testeable de forma independiente.
 
@@ -383,20 +406,26 @@ pantallas específicas de cada dominio funcional (Fases 6–9).
 - [ ] T076 [FE] Implementar la pantalla de reportes/analíticas (consume datos ya agregados, sin
   recálculo en cliente) en `frontend-admin/src/presentation/reportes/ReportesAnaliticaPage.tsx` (depende
   de T032, T044). Ref: FR-017.
-- [ ] T077 [FE] Implementar el flujo de "iniciar exportación" + polling de estado (`EN_PROCESO` → `LISTO`
-  / `ERROR`) en `frontend-admin/src/presentation/reportes/ExportarReporteAction.tsx` (depende de T025,
-  T032, T076). Ref: FR-018, FR-028, `research.md` §4.
-- [ ] T078 [FE] Implementar la acción de descarga, habilitada solo cuando
-  `exportacion.estaListoParaDescargar()` es verdadero, en
+- [ ] T077 [FE] Implementar la acción "iniciar exportación" como una operación **síncrona** de un solo
+  paso (sin polling: la llamada a `ReportesAnaliticaService.iniciarExportacion` devuelve directamente el
+  resultado final `exitoso`/`urlDescarga`/`mensajeError`) en
+  `frontend-admin/src/presentation/reportes/ExportarReporteAction.tsx` (depende de T025, T032, T076). Ref:
+  FR-018, FR-028, `research.md` §4, Clarifications Session 2026-09-08 pregunta 3. En caso de fallo, mostrar
+  el mensaje exacto "Error: Reporte no generado.".
+- [ ] T078 [FE] Implementar la acción de descarga, habilitada únicamente cuando el resultado de T077 fue
+  `exitoso === true` (la `urlDescarga` está disponible de inmediato, sin espera adicional), en
   `frontend-admin/src/presentation/reportes/DescargarReporteAction.tsx` (depende de T025, T077). Ref:
   FR-019.
 
 ### Tests de reportes y analíticas
 
-- [ ] T079 [P] [TEST] Test de `ExportarReporteAction` (muestra estado "en proceso" y transiciona a listo)
-  en `frontend-admin/tests/presentation/ExportarReporteAction.test.tsx` (depende de T077). Ref: FR-028.
-- [ ] T080 [P] [TEST] Test de `DescargarReporteAction` (deshabilitado hasta estado LISTO) en
-  `frontend-admin/tests/presentation/DescargarReporteAction.test.tsx` (depende de T078). Ref: FR-019.
+- [ ] T079 [P] [TEST] Test de `ExportarReporteAction` (caso síncrono exitoso: se ofrece descarga de
+  inmediato sin estado intermedio; caso síncrono fallido: se muestra el mensaje exacto
+  "Error: Reporte no generado.") en `frontend-admin/tests/presentation/ExportarReporteAction.test.tsx`
+  (depende de T077). Ref: FR-028, Clarifications Session 2026-09-08 pregunta 3.
+- [ ] T080 [P] [TEST] Test de `DescargarReporteAction` (habilitado únicamente cuando la exportación
+  síncrona fue exitosa) en `frontend-admin/tests/presentation/DescargarReporteAction.test.tsx` (depende de
+  T078). Ref: FR-019.
 
 **Checkpoint**: US6 completa y testeable de forma independiente. Todas las historias de usuario (US1–US6)
 quedan implementadas de forma independiente tras las Fases 5–9.
@@ -416,7 +445,8 @@ el cumplimiento de las reglas de negocio críticas de forma consolidada (SC-006 
   `frontend-admin/tests/presentation/ConfirmacionesExplicitas.test.tsx` (depende de T057, T058, T059,
   T066). Ref: SC-004.
 - [ ] T083 [P] [TEST] Test de cobertura de transiciones de estado válidas/ inválidas para
-  `EstadoPublicacion`, `EstadoDesafioPropuesto`, `EstadoReporte`, `EstadoExportacionReporte` en
+  `EstadoPublicacion`, `EstadoDesafioPropuesto`, `EstadoReporte`, y de los resultados válidos/inválidos de
+  `ExportacionReporte` (`exitoso`/`fallo`, ya no un enum de estado) en
   `frontend-admin/tests/domain/TransicionesDeEstado.test.ts` (depende de T020-T025).
 - [ ] T084 [P] [FE] Configurar reporte de cobertura de tests (`coverage`) en la configuración de
   `frontend-admin/jest.config.ts` (o `vitest.config.ts`) para verificar cumplimiento de SC-006 (depende de
@@ -435,9 +465,10 @@ backend real. Las tareas de backend aquí se limitan al **cumplimiento del contr
 frontend; la implementación interna del backend (persistencia, reglas server-side) está fuera de alcance
 de este módulo.
 
-- [ ] T085 [BE] Verificar/soportar que el backend expone los 15 endpoints de `contracts/openapi.yaml`
-  con los esquemas de request/response documentados (tarea de coordinación con el equipo de backend, no
-  de implementación del `frontend-admin/`).
+- [ ] T085 [BE] Verificar/soportar que el backend expone los endpoints de `contracts/openapi.yaml`
+  (exportación de reportes es síncrona: no existe endpoint de consulta de estado intermedio) con los
+  esquemas de request/response documentados (tarea de coordinación con el equipo de backend, no de
+  implementación del `frontend-admin/`).
 - [ ] T086 [FE] Implementar/validar un servidor de contrato (mock server) basado en
   `contracts/openapi.yaml` para pruebas de integración tempranas en
   `frontend-admin/tests/integration/mockServer.ts` (depende de T042).
@@ -454,9 +485,10 @@ de este módulo.
 - [ ] T090 [P] [TEST] Test de integración: ciclo completo aprobar/rechazar desafío contra el contrato en
   `frontend-admin/tests/integration/Desafios.integration.test.ts` (depende de T044, T086). Ref:
   FR-014, FR-015.
-- [ ] T091 [P] [TEST] Test de integración: ciclo completo iniciar exportación → consultar estado →
-  descargar en `frontend-admin/tests/integration/ReportesAnalitica.integration.test.ts` (depende de T044,
-  T086). Ref: FR-018, FR-019, FR-028.
+- [ ] T091 [P] [TEST] Test de integración: exportación síncrona de reporte de analítica (caso exitoso →
+  descarga inmediata; caso fallido → mensaje "Error: Reporte no generado.") contra el contrato en
+  `frontend-admin/tests/integration/ReportesAnalitica.integration.test.ts` (depende de T044, T086). Ref:
+  FR-018, FR-019, FR-028, Clarifications Session 2026-09-08 pregunta 3.
 - [ ] T092 [BE] Coordinar con backend la verificación de los códigos de error 401/403/404/409 documentados
   en `contracts/openapi.yaml` para los flujos de acciones sensibles (auto-baneo, transición inválida de
   desafío) — tarea de coordinación, no de implementación del `frontend-admin/`.
@@ -478,7 +510,7 @@ disponible.
 - [ ] T095 Ejecutar Escenario 3 de `quickstart.md` (Gestión de usuarios, US3) y registrar resultado.
   Depende de T085, T055-T059.
 - [ ] T096 Ejecutar Escenario 4 de `quickstart.md` (Dashboard administrativo, US4) y registrar resultado.
-  Depende de T085, T028.
+  Depende de T085, T028, T051bis.
 - [ ] T097 Ejecutar Escenario 5 de `quickstart.md` (Gestión de desafíos propuestos, US5) y registrar
   resultado. Depende de T085, T071-T073.
 - [ ] T098 Ejecutar Escenario 6 de `quickstart.md` (Reportes y analíticas exportables, US6) y registrar
@@ -538,17 +570,20 @@ disponible.
 | Requisito / Historia | Tareas principales |
 |---|---|
 | FR-001, FR-002 (login, acceso ADMIN) | T027, T048, T051, T052, T054, T093 |
-| FR-003 (dashboard) | T028, T035, T076 (indicadores), T096 |
-| FR-004..FR-007 (gestión de usuarios) | T019, T029, T033, T036, T055-T059, T060-T062, T089, T095 |
+| FR-003 (dashboard) | T028, T035, T051bis, T054bis, T096 |
+| FR-004..FR-007, FR-029 (gestión de usuarios, restricción ADMIN) | T019, T029, T033, T036, T055-T059,
+  T060-T062, T089, T095 |
 | FR-008..FR-011 (moderación) | T020, T021, T030, T037, T063-T067, T068-T070, T088, T094 |
 | FR-012..FR-016 (desafíos) | T022, T031, T038, T071-T073, T074-T075, T090, T097 |
-| FR-017..FR-019 (reportes/analíticas) | T024, T025, T032, T039, T076-T078, T079-T080, T091, T098 |
+| FR-017..FR-019, FR-028 (reportes/analíticas, exportación síncrona) | T024, T025, T032, T039, T076-T078,
+  T079-T080, T091, T098 |
 | FR-020, FR-027 (sesión válida, expiración) | T023, T041, T043, T045, T046, T093 |
 | FR-021, FR-022 (confirmación explícita) | T050, T053, T057, T058, T059, T066, T082, T099 |
 | FR-023 (diferenciación visual) | T049, T099 |
 | FR-024 (paginación/filtros server-side) | T029, T030, T055, T063, T088, T099 |
 | FR-025 (prioridad/antigüedad) | T021, T064, T070, T099 |
-| FR-026, FR-028, FR-029 (ambigüedades resueltas en research.md) | T011, T012, T021, T025, T032, T067, T077 |
+| FR-026 (resolver-sin-eliminar) | T011, T021, T067 |
+| ~~T012~~ (eliminada — exportación síncrona) | ver FR-017..FR-019, FR-028 arriba |
 | SC-006 (tests de reglas críticas) | T081, T082, T083, T084 |
 
 ---
