@@ -49,3 +49,18 @@ export function crearServiceFactory(): ServiceFactory {
     dashboardService,
   };
 }
+
+let instanciaCompartida: ServiceFactory | null = null;
+
+/**
+ * Devuelve una única instancia compartida de `ServiceFactory` para toda la aplicación (creada de
+ * forma perezosa en el primer uso). Necesario para que la sesión obtenida en el login
+ * (`AuthAdminService.obtenerSesionActual()`) sea la misma que consultan luego los guards de ruta
+ * (p. ej. `RequireAdmin`, T048) y las pantallas, sin recrear los servicios en cada uso.
+ */
+export function obtenerServiceFactory(): ServiceFactory {
+  if (!instanciaCompartida) {
+    instanciaCompartida = crearServiceFactory();
+  }
+  return instanciaCompartida;
+}
